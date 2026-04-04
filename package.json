@@ -1,6 +1,10 @@
 {
   "name": "web-sse",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Waelson/studio-chat.git"
+  },
   "workspaces": [
     "apps/*"
   ],
