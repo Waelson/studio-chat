@@ -2,6 +2,10 @@
 
 Aplicação de chat estilo assistente com respostas em **streaming** via **Server-Sent Events (SSE)**. A chave da OpenAI existe **apenas no backend** — nunca no browser nem em variáveis `VITE_*`.
 
+## Interface
+
+![Captura da interface do Studio Chat (tema claro)](docs/ui.png)
+
 ## Fluxo do chat (diagrama de sequência)
 
 Comunicação entre **UI**, **servidor** (Node) e **OpenAI**. O browser nunca fala diretamente com a OpenAI; só o servidor usa a chave de API.

@@ -27,7 +27,7 @@ type ChatMessage = {
   streaming?: boolean;
 };
 
-/** IDs únicos para chaves React. `randomUUID` não existe em HTTP na LAN (só em contexto seguro). */
+/** IDs únicos para as chaves do React. Em HTTP na rede local, `randomUUID` pode não existir (contexto não seguro). */
 function uid(): string {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === "function") {
@@ -63,7 +63,7 @@ export default function App() {
         setModelsError(null);
       } catch {
         if (!cancelled) {
-          setModelsError("Não foi possível carregar os modelos.");
+          setModelsError("Não foi possível carregar os modelos. Tente novamente.");
         }
       }
     })();
@@ -157,7 +157,7 @@ export default function App() {
           "error" in errBody &&
           typeof (errBody as { error: unknown }).error === "string"
             ? (errBody as { error: string }).error
-            : `Erro ${res.status}`;
+            : `Erro HTTP ${res.status}`;
         setError(msg);
         setMessages((prev) => prev.filter((m) => m.id !== assistantId));
         return;
@@ -176,7 +176,7 @@ export default function App() {
           ),
         );
       } else {
-        setError(e instanceof Error ? e.message : "Falha na rede");
+        setError(e instanceof Error ? e.message : "Erro de conexão. Verifique a rede.");
         finishAssistant(assistantId);
       }
     } finally {
@@ -227,7 +227,9 @@ export default function App() {
               <Sparkles className="h-5 w-5 text-white" aria-hidden />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold tracking-tight">Chat</h1>
+              <h1 className="truncate text-sm font-semibold tracking-tight">
+                Studio Chat
+              </h1>
               <p
                 className={
                   theme === "dark"
@@ -235,7 +237,7 @@ export default function App() {
                     : "text-xs text-zinc-500"
                 }
               >
-                Chat com streaming
+                Respostas em tempo real
               </p>
             </div>
           </div>
@@ -252,7 +254,7 @@ export default function App() {
                     ? "h-9 appearance-none rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 pr-8 pl-3 text-xs font-medium text-zinc-200 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                     : "h-9 appearance-none rounded-lg border border-zinc-300 bg-white py-1.5 pr-8 pl-3 text-xs font-medium text-zinc-800 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                 }
-                aria-label="Modelo OpenAI"
+                aria-label="Selecionar modelo da OpenAI"
               >
                 {models.map((m) => (
                   <option key={m} value={m}>
@@ -274,7 +276,11 @@ export default function App() {
                   ? "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:bg-zinc-800"
                   : "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-700 transition hover:bg-zinc-100"
               }
-              aria-label={theme === "dark" ? "Tema claro" : "Tema escuro"}
+              aria-label={
+                theme === "dark"
+                  ? "Alternar para tema claro"
+                  : "Alternar para tema escuro"
+              }
             >
               {theme === "dark" ? (
                 <Sun className="h-4 w-4" />
@@ -310,7 +316,7 @@ export default function App() {
               }
             >
               <p className="text-lg font-medium tracking-tight">
-                Como posso ajudar hoje?
+                Em que posso ajudar?
               </p>
               <p
                 className={
@@ -319,8 +325,8 @@ export default function App() {
                     : "mt-2 max-w-sm text-sm text-zinc-600"
                 }
               >
-                Escolha um modelo no topo e escreva uma mensagem. A resposta
-                aparece em tempo real via SSE.
+                Escolha um modelo acima, envie uma mensagem e acompanhe a
+                resposta em tempo real (SSE).
               </p>
             </div>
           </div>
@@ -443,8 +449,8 @@ export default function App() {
               onKeyDown={onKeyDown}
               placeholder={
                 modelsError
-                  ? "Configure o servidor para enviar mensagens…"
-                  : "Mensagem…"
+                  ? "Configure o servidor para poder enviar mensagens."
+                  : "Digite uma mensagem"
               }
               disabled={sending || !!modelsError || !model}
               className={
@@ -452,7 +458,7 @@ export default function App() {
                   ? "max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-3 py-2.5 text-base leading-snug text-zinc-100 placeholder:text-zinc-600 outline-none sm:text-sm"
                   : "max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-3 py-2.5 text-base leading-snug text-zinc-900 placeholder:text-zinc-400 outline-none sm:text-sm"
               }
-              aria-label="Mensagem"
+              aria-label="Campo de mensagem"
             />
             <button
               type="button"
@@ -465,7 +471,7 @@ export default function App() {
                   ? "mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-lg shadow-violet-600/25 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
                   : "mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-md transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
               }
-              aria-label="Enviar"
+              aria-label="Enviar mensagem"
             >
               {sending ? (
                 <Loader2 className="h-5 w-5 animate-spin" />

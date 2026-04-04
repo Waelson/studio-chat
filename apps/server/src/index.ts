@@ -68,7 +68,7 @@ app.post("/api/chat", async (request, reply) => {
   const parsed = chatBodySchema.safeParse(request.body);
   if (!parsed.success) {
     return reply.status(400).send({
-      error: "Corpo inválido",
+      error: "Requisição inválida.",
       details: parsed.error.flatten(),
     });
   }
@@ -128,7 +128,9 @@ app.post("/api/chat", async (request, reply) => {
       return;
     }
     const message =
-      err instanceof Error ? err.message : "Erro desconhecido ao contactar a OpenAI";
+      err instanceof Error
+        ? err.message
+        : "Erro desconhecido ao comunicar com a API da OpenAI.";
     writeSseChunk(streamOut, { type: "error", message });
     request.log.error({ err }, "chat stream error");
   } finally {

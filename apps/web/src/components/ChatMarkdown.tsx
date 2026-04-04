@@ -10,7 +10,7 @@ type ChatMarkdownProps = {
 };
 
 /**
- * Renderiza o conteúdo do assistente como Markdown (GFM), com estilos alinhados ao tema da app.
+ * Exibe a resposta do assistente em Markdown (GFM), com estilo conforme o tema da aplicação.
  */
 export function ChatMarkdown({ content, theme }: ChatMarkdownProps) {
   const isDark = theme === "dark";
