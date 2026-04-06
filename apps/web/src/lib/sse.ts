@@ -2,7 +2,8 @@
 export type ChatSseEvent =
   | { type: "content"; delta: string }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "file"; url: string; filename: string };
 
 /**
  * Lê um corpo `ReadableStream` no formato SSE (`data: ...`) e invoca `onEvent` por evento JSON parseável.

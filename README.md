@@ -1,6 +1,6 @@
 # Studio Chat (Node + React + SSE + OpenAI)
 
-Aplicação de chat estilo assistente com respostas em **streaming** via **Server-Sent Events (SSE)**. A chave da OpenAI existe **apenas no backend** — nunca no browser nem em variáveis `VITE_*`.
+Aplicação de chat estilo assistente com respostas em **streaming** via **Server-Sent Events (SSE)**. O **agente LangGraph** (Python) usa a API OpenAI com ferramentas de **previsão do tempo** (Open-Meteo) e **geração de PDF** (texto simples; ficheiros em `apps/agent/data/generated/`, descarregáveis via `GET /api/files/:id` através do Node). A chave `OPENAI_API_KEY` existe **só no serviço Python** (`apps/agent`); o browser nunca a vê.
 
 ## Interface
 
@@ -8,64 +8,79 @@ Aplicação de chat estilo assistente com respostas em **streaming** via **Serve
 
 ## Fluxo do chat (diagrama de sequência)
 
-Comunicação entre **UI**, **servidor** (Node) e **OpenAI**. O browser nunca fala diretamente com a OpenAI; só o servidor usa a chave de API.
+Comunicação entre **UI**, **Node (Fastify)**, **agente Python** e **OpenAI**. O browser fala só com o Node; o Node faz **proxy do stream** para o agente.
 
 ```mermaid
 sequenceDiagram
   participant UI as UI_React
-  participant S as Servidor_Node
+  participant Node as Servidor_Node
+  participant Py as Agente_Python
   participant OAI as OpenAI
 
-  UI->>S: GET /api/models
-  S-->>UI: lista de modelos
+  UI->>Node: GET /api/models
+  Node-->>UI: lista de modelos
 
-  UI->>S: POST /api/chat modelo e mensagens
-  S->>OAI: pedido em streaming
-  loop Resposta em tempo real
-    OAI-->>S: fragmentos de texto
-    S-->>UI: SSE com cada fragmento
+  UI->>Node: POST /api/chat
+  Node->>Py: proxy POST /api/chat
+  Py->>OAI: LangGraph stream com tools
+  loop SSE
+    Py-->>Node: fragmentos SSE
+    Node-->>UI: mesmo stream
   end
-  OAI-->>S: fim do stream
-  S-->>UI: SSE fim
 ```
 
 ### Etapas (em sequência)
 
-1. A UI pede ao servidor a lista de modelos (`GET /api/models`) e o utilizador escolhe um.
-2. Ao enviar o chat, a UI manda o histórico e o modelo ao servidor (`POST /api/chat`).
-3. O servidor contacta a OpenAI em modo **stream** e vai recebendo a resposta aos poucos.
-4. O servidor reenvia cada parte ao browser como **SSE**; a UI junta esses fragmentos e mostra o texto a aparecer em tempo real.
-5. Quando a OpenAI termina, o servidor fecha o fluxo SSE e a UI deixa de tratar a resposta como “em curso”.
+1. A UI pede ao Node a lista de modelos (`GET /api/models`) e escolhe o modelo.
+2. No envio, a UI manda histórico e modelo ao Node (`POST /api/chat`).
+3. O Node valida e reencaminha o pedido ao **agente Python** (`AGENT_URL`, por defeito `http://127.0.0.1:8001`).
+4. O agente (LangGraph + ChatOpenAI) pode invocar ferramentas (**tempo**, **PDF**) e devolve a resposta em **SSE**; o Node **encaminha o stream** sem alterar o formato.
+5. Se for gerado um PDF, o agente envia um evento SSE `file` com o URL de download; o browser obtém o ficheiro com `GET /api/files/:id` (proxy para o Python).
+6. O evento `done` fecha o fluxo na UI.
 
-O papel do servidor é **proxy seguro**: esconde a chave, valida o pedido e faz de ponte entre HTTP/SSE e a API da OpenAI.
+O Node continua a **validar modelo e CORS**; o segredo da OpenAI fica **no Python**.
 
 ## Requisitos
 
 - Node.js 20+
-- Chave de API OpenAI (`OPENAI_API_KEY`)
+- Python 3.9+ (recomendado 3.11+) com `pip`
+- Chave de API OpenAI (`OPENAI_API_KEY`) **no agente** (`apps/agent/.env`)
 
 ## Configuração segura da chave
 
-1. Copie `apps/server/.env.example` para `apps/server/.env`.
-2. Defina `OPENAI_API_KEY` **só** nesse ficheiro (ou via variáveis de ambiente no processo do servidor em produção).
-3. O ficheiro `.env` está no `.gitignore` e não deve ser commitado.
-4. **Não** coloque a chave em `apps/web` nem use prefixo `VITE_` para segredos — tudo com `VITE_` é embutido no bundle do cliente.
-
-Em produção, injete `OPENAI_API_KEY` pelo runtime (Docker/Kubernetes/PaaS) ou use um gestor de segredos (AWS Secrets Manager, Vault, etc.).
+1. Copie `apps/agent/.env.example` para `apps/agent/.env` e defina **`OPENAI_API_KEY`** (só aí).
+2. Copie `apps/server/.env.example` para `apps/server/.env` e, se necessário, **`AGENT_URL`** (por defeito `http://127.0.0.1:8001`).
+3. Não coloque a chave em `apps/web` nem em variáveis `VITE_*`.
+4. Os `.env` estão no `.gitignore`.
 
 ## Desenvolvimento
 
-Terminal 1 — API (porta 3001):
+**1 — Agente Python** (porta 8001):
+
+```bash
+cd apps/agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Defina OPENAI_API_KEY em .env
+
+PYTHONPATH=. uvicorn src.main:app --reload --host 0.0.0.0 --port 8001
+```
+
+Na **raiz** do repositório, depois do `venv` e do `pip install`, pode usar: `npm run dev:agent` (Unix/macOS; exige `apps/agent/.venv`).
+
+**2 — API Node** (porta 3001; proxy SSE → agente):
+
+Em `apps/server/.env`, **`AGENT_URL` tem de coincidir com a porta do Uvicorn** (por omissão `http://127.0.0.1:8001`, igual a `npm run dev:agent`). Se a porta no `.env` não for a mesma que o Uvicorn usa, o chat devolve 503 (`ECONNREFUSED`) mesmo com `npm run dev:full` a arrancar o Python.
 
 ```bash
 cd apps/server
 cp .env.example .env
-# Edite .env e defina OPENAI_API_KEY
-
 npm run dev
 ```
 
-Terminal 2 — UI (Vite, porta 5173; proxy `/api` → `http://localhost:3001`):
+**3 — UI** (Vite, porta 5173; proxy `/api` → `http://localhost:3001`):
 
 ```bash
 cd apps/web
@@ -105,5 +120,6 @@ VITE_API_URL=https://api.exemplo.com npm run build -w apps/web
 
 ## Estrutura
 
-- `apps/server` — Fastify, `GET /api/health`, `GET /api/models`, `POST /api/chat` (SSE).
+- `apps/agent` — FastAPI + LangGraph, `POST /api/chat` (SSE), `GET /api/files/:id` (PDFs gerados), ferramentas tempo + PDF; PDFs temporários em `data/generated/` (ignorados pelo Git exceto `.gitkeep`).
+- `apps/server` — Fastify: `GET /api/health`, `GET /api/models`, proxy de `POST /api/chat` e `GET /api/files/:id` para `AGENT_URL`.
 - `apps/web` — React, Vite, Tailwind, leitura incremental do stream SSE.
