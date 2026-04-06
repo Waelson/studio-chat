@@ -1,14 +1,14 @@
 # Studio Chat (Node + React + SSE + OpenAI)
 
-Aplicação de chat estilo assistente com respostas em **streaming** via **Server-Sent Events (SSE)**. O **agente LangGraph** (Python) usa a API OpenAI com ferramentas de **previsão do tempo** (Open-Meteo) e **geração de PDF** (texto simples; ficheiros em `apps/agent/data/generated/`, descarregáveis via `GET /api/files/:id` através do Node). A chave `OPENAI_API_KEY` existe **só no serviço Python** (`apps/agent`); o browser nunca a vê.
+Aplicação de chat estilo assistente com respostas em **streaming** via **Server-Sent Events (SSE)**. O **agente LangGraph** (Python / FastAPI) usa a API OpenAI com ferramentas de **previsão do tempo** (Open-Meteo, sem chave) e **geração de PDF** (texto simples; ficheiros em `apps/agent/data/generated/`, descarregáveis via `GET /api/files/:id` através do Node). A chave **`OPENAI_API_KEY`** existe **só** em `apps/agent/.env`; o browser nunca a vê.
 
 ## Interface
 
 ![Captura da interface do Studio Chat (tema claro)](docs/ui.png)
 
-## Fluxo do chat (diagrama de sequência)
+## Arquitetura
 
-Comunicação entre **UI**, **Node (Fastify)**, **agente Python** e **OpenAI**. O browser fala só com o Node; o Node faz **proxy do stream** para o agente.
+O browser fala **apenas** com o **Node (Fastify)**. O Node valida CORS e modelo, faz **proxy** do `POST /api/chat` (stream SSE) e do `GET /api/files/:id` para o **agente Python** (`AGENT_URL`).
 
 ```mermaid
 sequenceDiagram
@@ -29,97 +29,172 @@ sequenceDiagram
   end
 ```
 
-### Etapas (em sequência)
+### Etapas do fluxo
 
-1. A UI pede ao Node a lista de modelos (`GET /api/models`) e escolhe o modelo.
-2. No envio, a UI manda histórico e modelo ao Node (`POST /api/chat`).
-3. O Node valida e reencaminha o pedido ao **agente Python** (`AGENT_URL`, por defeito `http://127.0.0.1:8001`).
-4. O agente (LangGraph + ChatOpenAI) pode invocar ferramentas (**tempo**, **PDF**) e devolve a resposta em **SSE**; o Node **encaminha o stream** sem alterar o formato.
-5. Se for gerado um PDF, o agente envia um evento SSE `file` com o URL de download; o browser obtém o ficheiro com `GET /api/files/:id` (proxy para o Python).
-6. O evento `done` fecha o fluxo na UI.
-
-O Node continua a **validar modelo e CORS**; o segredo da OpenAI fica **no Python**.
+1. A UI obtém modelos com `GET /api/models` (lista permitida no servidor).
+2. No envio, a UI envia histórico + modelo em `POST /api/chat`.
+3. O Node reencaminha ao agente (`AGENT_URL`, por defeito `http://127.0.0.1:8001`).
+4. O agente (LangGraph + ChatOpenAI) pode usar **previsao_tempo** e **gerar_pdf**; a resposta chega em SSE (`content`, opcionalmente `file`, depois `done`).
+5. PDFs: evento SSE `file` com URL relativa; o download é `GET /api/files/:id` (Node → agente).
+6. O evento `done` termina o streaming na UI.
 
 ## Requisitos
 
-- Node.js 20+
-- Python 3.9+ (recomendado 3.11+) com `pip`
-- Chave de API OpenAI (`OPENAI_API_KEY`) **no agente** (`apps/agent/.env`)
+| Ferramenta | Versão |
+|------------|--------|
+| Node.js | 20+ |
+| Python | 3.9+ (recomendado 3.11+) |
+| npm | Incluído com Node |
 
-## Configuração segura da chave
+- Chave **OpenAI** apenas em `apps/agent/.env` (`OPENAI_API_KEY`).
 
-1. Copie `apps/agent/.env.example` para `apps/agent/.env` e defina **`OPENAI_API_KEY`** (só aí).
-2. Copie `apps/server/.env.example` para `apps/server/.env` e, se necessário, **`AGENT_URL`** (por defeito `http://127.0.0.1:8001`).
-3. Não coloque a chave em `apps/web` nem em variáveis `VITE_*`.
-4. Os `.env` estão no `.gitignore`.
+## Primeira configuração
 
-## Desenvolvimento
+Na **raiz** do repositório:
 
-**1 — Agente Python** (porta 8001):
+```bash
+npm install
+```
+
+**Agente Python** (uma vez):
 
 ```bash
 cd apps/agent
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
-# Defina OPENAI_API_KEY em .env
+# Edite .env e defina OPENAI_API_KEY
+cd ../..
+```
 
+**Servidor Node** (ficheiro de ambiente):
+
+```bash
+cp apps/server/.env.example apps/server/.env
+# Ajuste AGENT_URL se o agente não usar a porta 8001
+```
+
+Os ficheiros `.env` estão no `.gitignore` e não devem ser commitados.
+
+## Comandos npm (raiz do repositório)
+
+| Comando | Descrição |
+|---------|-----------|
+| `npm run dev:full` | Arranca **em paralelo**: agente Python (8001), API Node (3001) e Vite (5173). Recomendado para desenvolvimento. |
+| `npm run dev:agent` | Só o agente FastAPI/Uvicorn em `0.0.0.0:8001` (requer `apps/agent/.venv` e dependências instaladas). |
+| `npm run dev:server` | Só o Fastify em `0.0.0.0:3001` (workspace `apps/server`). |
+| `npm run dev:web` | Só o frontend Vite (workspace `apps/web`). |
+| `npm run build` | Build de `apps/server` e `apps/web`. |
+
+O pacote `concurrently` (devDependency na raiz) é usado por `dev:full`.
+
+## Iniciar a stack de desenvolvimento
+
+### Opção recomendada: tudo num único terminal
+
+```bash
+npm run dev:full
+```
+
+Abra **`http://localhost:5173`**. O Vite faz proxy de `/api` para **`http://localhost:3001`** (Node).
+
+**Importante:** `apps/server/.env` deve ter **`AGENT_URL`** com a **mesma porta** que o Uvicorn do agente. O script `dev:agent` usa **`--port 8001`**; o valor típico é:
+
+```env
+AGENT_URL=http://127.0.0.1:8001
+```
+
+Se `AGENT_URL` apontar para outra porta (ex.: 8000) e o agente estiver na 8001, o chat devolve **503** (`ECONNREFUSED`).
+
+### Opção: três terminais separados
+
+1. **Agente** — `npm run dev:agent` (ou manualmente `cd apps/agent` e o comando `uvicorn` da secção [Agente manual](#agente-manual-uvicorn)).
+2. **API Node** — `npm run dev:server` (ou `cd apps/server && npm run dev`).
+3. **UI** — `npm run dev:web` (ou `cd apps/web && npm run dev`).
+
+### Agente manual (uvicorn)
+
+```bash
+cd apps/agent
+source .venv/bin/activate
 PYTHONPATH=. uvicorn src.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-Na **raiz** do repositório, depois do `venv` e do `pip install`, pode usar: `npm run dev:agent` (Unix/macOS; exige `apps/agent/.venv`).
+### Portas em desenvolvimento
 
-**2 — API Node** (porta 3001; proxy SSE → agente):
+| Serviço | Porta | URL local típica |
+|---------|-------|-------------------|
+| Frontend (Vite) | 5173 | `http://localhost:5173` |
+| API Node (Fastify) | 3001 | `http://localhost:3001` |
+| Agente (FastAPI / Uvicorn) | 8001 | `http://127.0.0.1:8001` |
 
-Em `apps/server/.env`, **`AGENT_URL` tem de coincidir com a porta do Uvicorn** (por omissão `http://127.0.0.1:8001`, igual a `npm run dev:agent`). Se a porta no `.env` não for a mesma que o Uvicorn usa, o chat devolve 503 (`ECONNREFUSED`) mesmo com `npm run dev:full` a arrancar o Python.
+## Verificar saúde da stack
+
+- **Node + reachability do agente:** `GET http://localhost:3001/api/health`  
+  Resposta inclui `agent.url`, `agent.reachable` e, se falhar, `agent.error`. Convém **`reachable: true`** antes de testar o chat.
+
+- **Agente direto:** `GET http://127.0.0.1:8001/api/health` (se o agente estiver a correr).
+
+Exemplo:
 
 ```bash
-cd apps/server
-cp .env.example .env
-npm run dev
+curl -sS http://localhost:3001/api/health
 ```
 
-**3 — UI** (Vite, porta 5173; proxy `/api` → `http://localhost:3001`):
+## Eventos SSE (contrato com o frontend)
 
-```bash
-cd apps/web
-npm run dev
-```
+O stream de `POST /api/chat` envia linhas `data: {JSON}\n\n` com, entre outros:
 
-Abra `http://localhost:5173`.
+| `type` | Significado |
+|--------|-------------|
+| `content` | `delta`: texto a acrescentar à mensagem do assistente |
+| `file` | `url`, `filename`: link para descarregar um PDF gerado pela ferramenta |
+| `done` | Fim do stream |
+| `error` | `message`: erro a mostrar ao utilizador |
 
-### Aceder a partir de outra máquina na mesma rede
+## Aceder a partir de outra máquina na mesma rede
 
-1. **Vite na rede** — O `vite.config.ts` usa `server.host: true`, por isso ao correr `npm run dev` na pasta `apps/web` o terminal mostra também um endereço **Network** (ex.: `http://192.168.x.x:5173`). Use esse URL no browser do outro computador (a máquina que corre o dev server tem de estar na mesma LAN).
+1. **Vite** — Com `server.host: true` no `vite.config.ts`, o terminal mostra um URL **Network** (ex.: `http://192.168.x.x:5173`). Use-o no outro equipamento na mesma LAN.
 
-2. **Firewall** — Na máquina de desenvolvimento, permita tráfego de entrada na porta **5173** (macOS: Definições do Sistema → Rede → Firewall, ou regra para `node`).
+2. **Firewall** — Permita entrada na porta **5173** na máquina de desenvolvimento.
 
-3. **CORS** — O browser noutro PC envia `Origin: http://192.168.x.x:5173`, não `localhost`. No `apps/server/.env`, defina origens explícitas, por exemplo:
+3. **CORS** — O `Origin` será o IP do Vite, não `localhost`. Em `apps/server/.env`, por exemplo:  
    `CORS_ORIGIN=http://localhost:5173,http://192.168.1.10:5173`  
-   (substitua pelo IP real da máquina onde corre o Vite). Sem isto, os pedidos a `/api` podem falhar no browser apesar da página carregar.
+   (substitua pelo IP real).
 
-O proxy do Vite (`/api` → `localhost:3001`) continua a correr **na máquina do dev**; o outro equipamento só precisa de alcançar a porta **5173**.
+O proxy do Vite (`/api` → `localhost:3001`) corre na máquina onde corre o dev server; o cliente remoto só precisa de alcançar a porta **5173**.
 
-## Build
+## Resolução de problemas
+
+| Sintoma | Causa provável |
+|---------|----------------|
+| **503** no `POST /api/chat` com `ECONNREFUSED` | Agente parado ou **`AGENT_URL`** com porta diferente da do Uvicorn. Confirme com `/api/health`. |
+| **503** com mensagem sobre OpenAI | `OPENAI_API_KEY` em falta ou inválida em `apps/agent/.env`. |
+| Modelos não carregam | API Node não acessível; confirme `npm run dev:server` ou `dev:full`. |
+| PDF não descarrega | Agente tem de ter gerado o ficheiro; URL relativa `/api/files/...` deve passar pelo Node (mesma origem ou `VITE_API_URL` em produção). |
+
+## Build de produção
 
 ```bash
 npm run build
 ```
 
-- API compilada em `apps/server/dist` (`npm run build -w apps/server` + `npm start -w apps/server`).
+- API compilada em `apps/server/dist` — `npm start -w apps/server` após build.
 - Frontend em `apps/web/dist`.
 
 ## Frontend e API em hosts diferentes
 
-Defina no build do frontend uma URL base pública (não secreta), por exemplo:
+No build do frontend, defina a URL pública da API (não é segredo):
 
 ```bash
 VITE_API_URL=https://api.exemplo.com npm run build -w apps/web
 ```
 
-## Estrutura
+## Estrutura do monorepo
 
-- `apps/agent` — FastAPI + LangGraph, `POST /api/chat` (SSE), `GET /api/files/:id` (PDFs gerados), ferramentas tempo + PDF; PDFs temporários em `data/generated/` (ignorados pelo Git exceto `.gitkeep`).
-- `apps/server` — Fastify: `GET /api/health`, `GET /api/models`, proxy de `POST /api/chat` e `GET /api/files/:id` para `AGENT_URL`.
-- `apps/web` — React, Vite, Tailwind, leitura incremental do stream SSE.
+- **`apps/agent`** — FastAPI + LangGraph: `POST /api/chat` (SSE), `GET /api/files/:id`, `GET /api/health`; ferramentas `previsao_tempo`, `gerar_pdf`; PDFs em `data/generated/` (ignorados pelo Git exceto `.gitkeep`).
+- **`apps/server`** — Fastify: `GET /api/health`, `GET /api/models`, proxy de `POST /api/chat` e `GET /api/files/:id` para `AGENT_URL`.
+- **`apps/web`** — React, Vite, Tailwind, leitura incremental do stream SSE.
+
+Repositório GitHub: [studio-chat](https://github.com/Waelson/studio-chat) (nome do remoto pode variar).
