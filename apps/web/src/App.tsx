@@ -8,6 +8,7 @@ import {
 import {
   Bot,
   ChevronDown,
+  FileDown,
   Loader2,
   Send,
   Sparkles,
@@ -25,6 +26,8 @@ type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   streaming?: boolean;
+  /** PDFs ou outros ficheiros anunciados via SSE `type: file`. */
+  files?: { url: string; filename: string }[];
 };
 
 /** IDs únicos para as chaves do React. Em HTTP na rede local, `randomUUID` pode não existir (contexto não seguro). */
@@ -86,6 +89,19 @@ export default function App() {
     );
   }, []);
 
+  const appendAssistantFile = useCallback(
+    (assistantId: string, url: string, filename: string) => {
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== assistantId) return m;
+          const files = [...(m.files ?? []), { url, filename }];
+          return { ...m, files };
+        }),
+      );
+    },
+    [],
+  );
+
   const finishAssistant = useCallback((assistantId: string) => {
     setMessages((prev) =>
       prev.map((m) =>
@@ -98,6 +114,8 @@ export default function App() {
     (ev: ChatSseEvent, assistantId: string) => {
       if (ev.type === "content") {
         appendAssistantDelta(assistantId, ev.delta);
+      } else if (ev.type === "file") {
+        appendAssistantFile(assistantId, ev.url, ev.filename);
       } else if (ev.type === "done") {
         finishAssistant(assistantId);
       } else if (ev.type === "error") {
@@ -105,7 +123,7 @@ export default function App() {
         finishAssistant(assistantId);
       }
     },
-    [appendAssistantDelta, finishAssistant],
+    [appendAssistantDelta, appendAssistantFile, finishAssistant],
   );
 
   async function sendMessage() {
@@ -384,6 +402,26 @@ export default function App() {
                   {m.role === "assistant" ? (
                     <div className="min-w-0">
                       <ChatMarkdown content={m.content} theme={theme} />
+                      {m.files && m.files.length > 0 && (
+                        <ul className="mt-3 flex flex-col gap-2">
+                          {m.files.map((f) => (
+                            <li key={`${f.url}-${f.filename}`}>
+                              <a
+                                href={`${API_BASE}${f.url.startsWith("/") ? f.url : `/${f.url}`}`}
+                                download={f.filename}
+                                className={
+                                  theme === "dark"
+                                    ? "inline-flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm font-medium text-violet-200 transition hover:bg-violet-500/20"
+                                    : "inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-800 transition hover:bg-violet-100"
+                                }
+                              >
+                                <FileDown className="h-4 w-4 shrink-0" aria-hidden />
+                                Descarregar {f.filename}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                       {m.streaming && (
                         <span
                           className="ml-0.5 inline-block h-4 w-0.5 animate-pulse rounded-sm bg-violet-500 align-[-2px]"

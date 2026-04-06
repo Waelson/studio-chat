@@ -1,0 +1,11 @@
+# Python 3.9+ (recomendado 3.11+)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+langchain>=0.3.14
+langchain-openai>=0.3.14
+langchain-core>=0.3.29
+langgraph>=0.2.60
+httpx>=0.28.0
+pydantic>=2.10.0
+python-dotenv>=1.0.0
+fpdf2>=2.8.0
